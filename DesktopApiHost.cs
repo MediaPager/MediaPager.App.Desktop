@@ -11,12 +11,19 @@ namespace MediaPager.App.Desktop;
 /// </summary>
 internal sealed class DesktopApiHost : IAsyncDisposable
 {
-    private readonly Process? _process;
+    private readonly object _processGate = new();
+    private readonly ProcessStartInfo? _startInfo;
+    private readonly CancellationTokenSource _shutdown = new();
+    private readonly Task? _monitorTask;
+    private Process? _process;
 
-    private DesktopApiHost(Process? process, Uri address)
+    private DesktopApiHost(Process? process, Uri address, ProcessStartInfo? startInfo)
     {
         _process = process;
         Address = address;
+        _startInfo = startInfo;
+        if (process is not null && startInfo is not null)
+            _monitorTask = Task.Run(MonitorApiAsync);
     }
 
     public Uri Address { get; }
@@ -24,7 +31,7 @@ internal sealed class DesktopApiHost : IAsyncDisposable
     public static async Task<DesktopApiHost> StartAsync(CancellationToken cancellationToken = default)
     {
         if (Uri.TryCreate(Environment.GetEnvironmentVariable("MEDIAPAGER_DESKTOP_URL"), UriKind.Absolute, out var externalUrl))
-            return new DesktopApiHost(null, externalUrl);
+            return new DesktopApiHost(null, externalUrl, null);
 
         var apiAssembly = ResolveApiAssembly();
         if (apiAssembly is null)
@@ -69,7 +76,7 @@ internal sealed class DesktopApiHost : IAsyncDisposable
         try
         {
             await WaitUntilReadyAsync(address, process, cancellationToken);
-            return new DesktopApiHost(process, address);
+            return new DesktopApiHost(process, address, startInfo);
         }
         catch
         {
@@ -81,24 +88,128 @@ internal sealed class DesktopApiHost : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (_process is null) return;
+        _shutdown.Cancel();
+        Process? process;
+        lock (_processGate)
+        {
+            process = _process;
+            _process = null;
+        }
+        if (process is not null)
+        {
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            catch (InvalidOperationException)
+            {
+                // The host already exited.
+            }
+            catch (TimeoutException)
+            {
+                // The desktop shell must still close if a host shutdown hook is stuck.
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+        if (_monitorTask is not null)
+        {
+            try { await _monitorTask.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (TimeoutException) { }
+        }
+    }
+
+    private async Task MonitorApiAsync()
+    {
+        while (!_shutdown.IsCancellationRequested)
+        {
+            Process? process;
+            lock (_processGate) process = _process;
+            if (process is null)
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), _shutdown.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                await StartReplacementAsync();
+                continue;
+            }
+
+            try
+            {
+                await process.WaitForExitAsync(_shutdown.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            lock (_processGate)
+            {
+                if (ReferenceEquals(_process, process)) _process = null;
+            }
+            process.Dispose();
+            if (_shutdown.IsCancellationRequested) return;
+            Console.Error.WriteLine("The local API host exited; restarting it.");
+            await StartReplacementAsync();
+        }
+    }
+
+    private async Task StartReplacementAsync()
+    {
+        if (_shutdown.IsCancellationRequested || _startInfo is null) return;
+        Process? replacement = null;
         try
         {
-            if (!_process.HasExited)
-                _process.Kill(entireProcessTree: true);
-            await _process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            replacement = Process.Start(_startInfo)
+                ?? throw new InvalidOperationException("Could not restart the local MediaPager API host.");
+            _ = DrainAsync(replacement.StandardOutput, _shutdown.Token);
+            _ = DrainAsync(replacement.StandardError, _shutdown.Token);
+            lock (_processGate)
+            {
+                if (_shutdown.IsCancellationRequested)
+                {
+                    replacement.Kill(entireProcessTree: true);
+                    replacement.Dispose();
+                    return;
+                }
+                _process = replacement;
+            }
+            await WaitUntilReadyAsync(Address, replacement, _shutdown.Token).ConfigureAwait(false);
+            Console.Error.WriteLine("The local API host restarted.");
         }
-        catch (InvalidOperationException)
+        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
         {
-            // The host already exited.
+            lock (_processGate)
+            {
+                if (ReferenceEquals(_process, replacement)) _process = null;
+            }
+            if (replacement is not null)
+            {
+                try { if (!replacement.HasExited) replacement.Kill(entireProcessTree: true); } catch { }
+                replacement.Dispose();
+            }
         }
-        catch (TimeoutException)
+        catch (Exception exception)
         {
-            // The desktop shell must still close if a host shutdown hook is stuck.
-        }
-        finally
-        {
-            _process.Dispose();
+            lock (_processGate)
+            {
+                if (ReferenceEquals(_process, replacement)) _process = null;
+            }
+            if (replacement is not null)
+            {
+                try { if (!replacement.HasExited) replacement.Kill(entireProcessTree: true); } catch { }
+                replacement.Dispose();
+            }
+            Console.Error.WriteLine($"The local API host restart failed: {exception.Message}");
         }
     }
 

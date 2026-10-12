@@ -28,8 +28,8 @@ override that root for local development.
 
 FFmpeg 9.0.2 and Playwright 1.63.0 tools are bootstrapped in the background into `tools/`
 beside the bundled API binary (override with `MEDIAPAGER_Tools__Directory`). The UI and API
-start while setup runs, and progress appears in Activity → Notifications. Downloads are
-versioned and reused on later launches; neither toolchain is installed into the host's
+start while setup runs, and progress appears in Activity → Notifications. Tool versions are
+reused on later launches; neither toolchain is installed into the host's
 system directories. If that directory needs administrator rights, the standalone installer
 requests OS authorization; the API continues running as the logged-in user.
 
