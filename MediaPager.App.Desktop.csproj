@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <RootNamespace>MediaPager.App.Desktop</RootNamespace>
+    <AssemblyName>MediaPager.App.Desktop</AssemblyName>
+    <Version>0.1.0</Version>
+    <Description>Cross-platform Avalonia WebView shell for the MediaPager Quasar application.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.0" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.0" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.0" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.0" />
+    <PackageReference Include="Avalonia.Controls.WebView" Version="12.1.0" />
+  </ItemGroup>
+
+  <Target Name="BuildDesktopUi" BeforeTargets="Publish">
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)/../MediaPager.App.Ui" Command="npm ci" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)/../MediaPager.App.Ui" Command="npm run build" />
+  </Target>
+
+  <Target Name="PublishDesktopHost" AfterTargets="Publish">
+    <PropertyGroup>
+      <_DesktopHostPublishDir>$([System.IO.Path]::GetFullPath('$(PublishDir)host/', '$(MSBuildProjectDirectory)'))</_DesktopHostPublishDir>
+      <_DesktopOfficialPluginsDir>$(_DesktopHostPublishDir)plugins/official</_DesktopOfficialPluginsDir>
+    </PropertyGroup>
+
+    <MSBuild Projects="$(MSBuildProjectDirectory)/../MediaPager.App.Api/MediaPager.App.Api.csproj"
+             Targets="Restore;Publish"
+             BuildInParallel="false"
+             Properties="Configuration=$(Configuration);TargetFramework=net10.0;RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(SelfContained);PublishDir=$(_DesktopHostPublishDir);MediaPagerOfficialPluginsDir=$(_DesktopOfficialPluginsDir);CompressionEnabled=false" />
+
+    <ItemGroup>
+      <_DesktopUiAsset Include="$(MSBuildProjectDirectory)/../MediaPager.App.Ui/dist/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_DesktopUiAsset)"
+          DestinationFiles="@(_DesktopUiAsset->'$(_DesktopHostPublishDir)wwwroot/%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

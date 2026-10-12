@@ -1,0 +1,23 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MediaPager.App.Desktop.MainWindow"
+        Title="MediaPager"
+        Width="1280"
+        Height="820"
+        MinWidth="760"
+        MinHeight="560"
+        Background="#101216">
+  <Grid>
+    <NativeWebView x:Name="Browser" IsVisible="False" />
+    <Border x:Name="StartupPanel" Background="#101216">
+      <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12" MaxWidth="620">
+        <TextBlock Text="MediaPager" FontSize="28" FontWeight="SemiBold" HorizontalAlignment="Center" />
+        <TextBlock x:Name="StartupMessage"
+                   Text="Starting the local MediaPager host…"
+                   TextWrapping="Wrap"
+                   HorizontalAlignment="Center"
+                   Foreground="#b8bec8" />
+      </StackPanel>
+    </Border>
+  </Grid>
+</Window>
